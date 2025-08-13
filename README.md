@@ -1,136 +1,138 @@
 # Improving MLLM-Based Food Weight Estimation Through Targeted Visual Feature Augmentation
 
-End-to-end pipeline:
-1. Segmentation (produces masks)
-2. Area + shape descriptors from masks
-3. Food classification (for density prior + class-specific features)
-4. Feature tokenization (numeric → embedding tokens)
-5. Image encoder (CLIP ViT-L/14 by default)
-6. Fusion + reasoning transformer (augments image embedding with feature tokens)
-7. Physics-constrained reasoning: combines learned regression with physics formula (volume ≈ area * height_estimate, weight = volume * density_prior)
-8. Multi-item aggregation (plate-level / meal-level weight)
+This project implements an end-to-end pipeline:
 
-## Dataset Assumptions
+1. CV Frontend
+   - Segmentation (instance masks)
+   - Area calculation + pixel-to-real scale estimation
+   - Shape descriptors (circularity, elongation, convexity, Hu moments, etc.)
+   - Food classification (category + density prior)
+   - Feature Tokenization (numeric -> textual or learned embedding tokens)
 
-Folder layout (example):
-```
-data/
-  train/
-    images/
-      img_0001.jpg
-      ...
-    masks/
-      img_0001.png        # single-channel mask (0 background, >0 foreground) OR multi-class mask
-    annotations.csv        # columns: image_id, class_name, weight_g, (optional) height_cm, item_id, group_id
-  val/
-    images/...
-    masks/...
-    annotations.csv
-  test/
-    images/...
-    masks/...
-    annotations.csv
-```
+2. MLLM Core
+   - Loads a small open-source Multimodal LLM (default: LLaVA 1.5 7B or Qwen2-VL 2B for Colab)
+   - Injects structured features via:
+     a. Prompt-level textual augmentation ("FEATURES: area=..., circularity=...")
+     b. Optional learned Feature Adapter projecting numeric features into the model's embedding space as pseudo-image tokens
 
-`group_id` groups multiple items (e.g., meal). `item_id` distinguishes instances on the same plate (if you have per-item masks). If instance-level segmentation not available, item_id can be same as image_id.
+3. Physics-Constrained Reasoning
+   - Uses priors on density and plausible thickness heuristics
+   - Computes a constrained volume estimate
+   - Combines MLLM semantic embedding + CV numeric features via fusion network
+   - Outputs final per-item weights and aggregated plate weight
 
-If using Ghana dataset, adapt a preprocessing script to export into this structure.
+4. Evaluation
+   - Weight prediction metrics: MAE, RMSE, MAPE
+   - Classification accuracy
+   - Ablations for: no features, +shape, +physics, +adapter
 
 ## Quick Start (Colab)
 
 ```bash
-!git clone <your_repo_url> food_weight_estimation
-%cd food_weight_estimation
+!git clone <your_fork_url> food-weight-estimation
+%cd food-weight-estimation
 !pip install -r requirements.txt
 ```
 
-Then:
+Prepare data (expects images + annotations in a simple JSON or COCO-like format):
 ```bash
-python scripts/run_full_pipeline.py \
-  --data_root /content/data \
-  --output_dir /content/output \
-  --train_all
+python scripts/prepare_data.py --raw_dir /content/drive/MyDrive/ghana --out_dir data/processed
 ```
 
-Or open `colab_notebook.py` for a step-by-step interactive run.
-
-## Key Components
-
-- Segmentation: UNet (fast) or `torchvision` DeepLabV3; optional integration of Segment Anything (SAM) stub.
-- Classification: EfficientNet-B0 (timm).
-- Shape Descriptors:
-  - Area (pixels)
-  - Perimeter
-  - Convex area ratio
-  - Eccentricity
-  - Aspect ratio
-  - Circularity
-  - Extent
-  - Hu Moments (log transformed)
-  - Mean / std / entropy of masked RGB
-- Feature Tokenization: Numeric features → MLP → tokens appended to visual embedding (or cross-attended).
-- MLLM Core: CLIP visual encoder + lightweight multimodal fusion transformer (custom).
-- Physics Module:
-  - Density prior (configurable JSON)
-  - Height estimation network (regresses plausible height_cm from shape features)
-  - Physics weight = area_cm2 * height_cm * density (with scaling from pixel-to-cm via reference estimation or learned scale)
-  - Final weight = α * learned_weight + (1-α) * physics_weight (α learned / adaptive per sample)
-- Losses: Smooth L1 for weight, classification CE, segmentation Dice + BCE, auxiliary physics consistency loss.
-- Evaluation: MAE, MAPE, RMSE, R^2, per-class metrics, confusion matrix for classification, weight calibration plots.
-
-## Extending Density Priors
-
-Edit `data/density_priors.json` with `{"class_name": {"density_g_per_cm3": float, "mean_height_cm": float}}`.
-
-## Multi-Item Aggregation
-
-If multiple items (same group_id) exist: aggregated weight = sum(predicted_item_weights). Optionally apply plate-level correction via linear calibration.
-
-## Training Order
-
-You can:
-1. Train segmentation: `python training/train_segmentation.py`
-2. Train classification: `python training/train_classifier.py`
-3. Train weight model (loads frozen encoders by default): `python training/train_weight.py`
-
-Or `--train_all` in script orchestrates.
-
-## Model Checkpoints
-
-Default: stored in `output/checkpoints/`. Names:
-- segmentation_best.pt
-- classifier_best.pt
-- weight_model_best.pt
-
-## Inference
-
+Train classifier:
 ```bash
-python inference/predict.py \
-  --data_root /content/data/test \
-  --checkpoint_dir /content/output/checkpoints \
-  --out_csv /content/output/predictions.csv
+python -m src.training.train_classifier --config configs/base.yaml
 ```
 
-## Colab Notebook
+Run full pipeline (segmentation->features->MLLM weight estimation):
+```bash
+python scripts/run_full_pipeline.py --config configs/base.yaml --images data/processed/val/images
+```
 
-`colab_notebook.py` contains a linear runnable script to mount drive, install deps, train, evaluate, and visualize.
+## Data Assumptions
+
+Directory layout after preparation:
+```
+data/processed/
+  train/
+    images/*.jpg
+    annotations.json
+  val/
+    images/*.jpg
+    annotations.json
+  densities.json        # mapping food_label -> density (g/cm^3)
+  class_mapping.json
+```
+
+Each annotation entry (COCO-like):
+```json
+{
+ "file_name": "img_001.jpg",
+ "height": 1024,
+ "width": 1024,
+ "segments_info": [
+   {
+     "id": 1,
+     "bbox": [x,y,w,h],
+     "category": "plantain",
+     "mask_rle": "...",
+     "weight_g": 120.0    // optional ground truth
+   }
+ ]
+}
+```
+
+If no per-instance weight, but total plate weight known, you can still train fusion model with aggregated constraints later.
+
+## Feature List
+
+- Pixel area, convex area, area_ratio
+- Contour perimeter
+- Circularity, solidity, extent, aspect_ratio
+- Major/minor axis (ellipse fit)
+- Hu moments (first 4)
+- Mean/Std color (RGB or Lab)
+- Relative plate coverage
+- Classification logits / probability vector
+
+## Physics Constraints
+
+Estimated volume = (projected_area * estimated_height)
+estimated_height derived from:
+- Food class thickness prior in priors.py
+- Shape heuristic (elongation vs thickness)
+Weight = volume * density_prior(class)
+Clamp & adjust with MLLM semantic cues (e.g., "sliced", "mashed" -> modifies thickness factor)
+
+## MLLM Integration Modes
+
+1. Prompt Augmentation (zero extra training):
+   "Describe the portion weights. FEATURES: item_1: class=plantain, area=34.2cm2, circularity=0.71, thickness=1.8cm ..."
+
+2. Feature Adapter:
+   - Numeric feature vector -> Linear/MLP -> embedding dimension -> appended to vision tokens -> forward pass -> pooled
+   - Trained with lightweight LoRA on MLLM (optional; disabled by default for Colab memory limits).
+
+## Evaluation
+
+Outputs a CSV:
+```
+image_id, instance_id, true_weight, pred_weight, class_true, class_pred, abs_error_g
+```
+
+And prints aggregated metrics.
 
 ## Reproducibility
 
-Set seeds in `config/config.py`. Determinism may still vary due to CuDNN nondeterministic ops.
+All hyperparameters in configs/base.yaml. Set random seeds in seed.py.
+
+## Extending
+
+- Swap segmentation with SAM fine-tuning
+- Add depth estimation to refine height
+- Introduce mixture density networks for weight uncertainty
+
+See detailed run instructions in the bottom of this README after cloning.
 
 ## License
-
-Provided as academic reference. Verify compliance with any external model (CLIP) licenses for redistribution.
-
-## Notes
-
-- If you have a known reference object (e.g., checker card, standard plate diameter), implement pixel-to-cm scale in `cv/area.py` (placeholder included).
-- If segmentation masks are not available, enable `--weak_segmentation` to approximate using threshold + GrabCut.
-- MLLM customizing: You can swap CLIP with LLaVA style model; would require adjusting tokenizer alignment.
-
-## Roadmap Ideas
-
-- Integrate depth estimation for improved height inference.
-- Few-shot density adaptation via Bayesian updating.
-- Uncertainty estimation (MC dropout).
+Choose an appropriate license (MIT suggested) before release.

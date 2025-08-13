@@ -1,0 +1,51 @@
+seed: 42
+device: "cuda"
+
+data:
+  root: "data/processed"
+  train_split: "train"
+  val_split: "val"
+  num_workers: 4
+  batch_size: 8
+  img_size: 448
+  cache: false
+
+model:
+  classifier:
+    arch: "resnet50"
+    pretrained: true
+    num_classes: 50
+    lr: 3e-4
+    weight_decay: 1e-4
+    epochs: 15
+  weight_predictor:
+    feature_dim: 128
+    fusion_dim: 768
+    hidden_dims: [512,256]
+    dropout: 0.15
+    lr: 2e-4
+    epochs: 20
+    use_feature_adapter: false
+
+mllm:
+  name: "liuhaotian/llava-v1.5-7b"
+  max_new_tokens: 128
+  prompt_mode: "text"  # or adapter
+  lora:
+    enable: false
+    r: 8
+    alpha: 16
+    dropout: 0.05
+
+physics:
+  enable: true
+  thickness_adjust_semantics: true
+
+logging:
+  use_wandb: false
+  project: "food-weight-estimation"
+  run_name: "baseline"
+
+eval:
+  save_csv: "outputs/predictions.csv"
+  metrics_out: "outputs/metrics.json"
