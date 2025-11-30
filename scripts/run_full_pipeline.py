@@ -1,87 +1,186 @@
-import os, glob, argparse, json, cv2, torch, csv
-from PIL import Image
-from tqdm import tqdm
-from src.cv.segmentation import Segmenter
-from src.cv.area_shape import compute_all_features
-from src.cv.feature_tokenizer import NumericFeatureTokenizer
-from src.cv.classification import build_classifier
-from src.mllm.llava_wrapper import MLLMWrapper
-from src.models.weight_predictor import FusionWeightPredictor
-from src.mllm.feature_adapter import FeatureAdapter
-from src.physics.reasoner import physics_weight
-from src.utils.config import load_config
-from src.utils.logging import console
-from src.training.train_weight_model import FEATURE_KEYS
+import os
+import sys
+import argparse
+from pathlib import Path
+
+# Import stage scripts
+from stage_1_generate_data import stage_1_generate_data
+from stage_2_train_model import stage_2_train_model
+from stage_3_verify_test import stage_3_verify_test
+
+def setup_environment(root_dir):
+    """Set up directory structure and paths"""
+    print("\n" + "="*60)
+    print("PROJECT SETUP")
+    print("="*60)
+    
+    # Define all paths
+    paths = {
+        'root': root_dir,
+        'images': os.path.join(root_dir, "images_with_gt_weights"),
+        'master_csv': os.path.join(root_dir, "ghana_gt_weights_w_filenames_images.csv"),
+        'tf_model_dir': os.path.join(root_dir, "tf_portion_model"),
+        'tf_model_file': os.path.join(root_dir, "tf_portion_model", "ghana_frozen_graph_9.0_489ksteps.pb"),
+        'data_dir': os.path.join(root_dir, "data"),
+        'checkpoint_dir': os.path.join(root_dir, "food_llm_v1"),
+        'final_adapter_dir': os.path.join(root_dir, "final_adapter"),
+        'train_subset_csv': os.path.join(root_dir, "ghana_train_subset.csv"),
+        'dataset_json': os.path.join(root_dir, "data", "dataset.json"),
+        'tf_script': os.path.join(root_dir, "scripts", "run_tf_inference.py"),
+    }
+    
+    # Verify required input paths
+    print("\n📍 Checking input paths...")
+    required_inputs = [
+        paths['images'],
+        paths['master_csv'],
+        paths['tf_model_file'],
+    ]
+    
+    for path in required_inputs:
+        if os.path.exists(path):
+            print(f"   ✓ {os.path.basename(path)}")
+        else:
+            print(f"   ✗ MISSING: {path}")
+            return None
+    
+    # Create output directories
+    print("\n📁 Creating output directories...")
+    os.makedirs(paths['data_dir'], exist_ok=True)
+    os.makedirs(paths['checkpoint_dir'], exist_ok=True)
+    os.makedirs(paths['final_adapter_dir'], exist_ok=True)
+    print("   ✓ Output directories ready")
+    
+    return paths
 
 def main():
-    ap=argparse.ArgumentParser()
-    ap.add_argument("--config", required=True)
-    ap.add_argument("--images", required=True)
-    args=ap.parse_args()
-    cfg=load_config(args.config)
-    device=cfg["device"]
-    seg=Segmenter(device=device)
-    classifier=build_classifier(cfg).to(device)
-    classifier.load_state_dict(torch.load("checkpoints/food_classifier.pt", map_location=device))
-    classifier.eval()
-    mllm=MLLMWrapper(cfg["mllm"]["name"], device=device, max_new_tokens=cfg["mllm"]["max_new_tokens"])
-    tokenizer=NumericFeatureTokenizer(FEATURE_KEYS)
-    ckpt=torch.load("checkpoints/weight_predictor.pt", map_location=device)
-    adapter=None
-    if cfg["model"]["weight_predictor"]["use_feature_adapter"]:
-        feature_dim=len(FEATURE_KEYS)+cfg["model"]["classifier"]["num_classes"]+3
-        adapter=FeatureAdapter(feature_dim,768).to(device)
-        adapter.load_state_dict(ckpt["adapter"])
-        adapter.eval()
-        pred_model=FusionWeightPredictor(768,768,
-                                         hidden_dims=cfg["model"]["weight_predictor"]["hidden_dims"],
-                                         dropout=cfg["model"]["weight_predictor"]["dropout"]).to(device)
-    else:
-        pred_model=FusionWeightPredictor(len(FEATURE_KEYS)+cfg["model"]["classifier"]["num_classes"]+3,
-                                         768,
-                                         hidden_dims=cfg["model"]["weight_predictor"]["hidden_dims"],
-                                         dropout=cfg["model"]["weight_predictor"]["dropout"]).to(device)
-    pred_model.load_state_dict(ckpt["predictor"]); pred_model.eval()
+    parser = argparse.ArgumentParser(
+        description="Complete Project Reconstruction Pipeline"
+    )
+    parser.add_argument(
+        "--root_dir",
+        required=True,
+        help="Root project directory (where all data lives)"
+    )
+    parser.add_argument(
+        "--subset_size",
+        type=int,
+        default=150,
+        help="Number of images for training (default: 150)"
+    )
+    parser.add_argument(
+        "--stages",
+        nargs='+',
+        type=int,
+        choices=[1, 2, 3],
+        default=[1, 2, 3],
+        help="Stages to run (default: 1 2 3)"
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=2,
+        help="Training batch size (default: 2)"
+    )
+    parser.add_argument(
+        "--num_epochs",
+        type=int,
+        default=1,
+        help="Number of training epochs (default: 1)"
+    )
+    parser.add_argument(
+        "--num_tests",
+        type=int,
+        default=3,
+        help="Number of test samples (default: 3)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Setup
+    print("\n" + "#"*60)
+    print("# FOOD WEIGHT ESTIMATION - COMPLETE RECONSTRUCTION")
+    print("#"*60)
+    
+    paths = setup_environment(args.root_dir)
+    if paths is None:
+        print("\n❌ Setup failed. Please check input paths.")
+        return 1
+    
+    # Stage 1: Generate Data
+    if 1 in args.stages:
+        print("\n\n" + "#"*60)
+        print("# STAGE 1: GENERATE DATA")
+        print("#"*60)
+        
+        success = stage_1_generate_data(
+            root_dir=paths['root'],
+            master_csv_path=paths['master_csv'],
+            image_dir=paths['images'],
+            tf_model_file=paths['tf_model_file'],
+            tf_script_path=paths['tf_script'],
+            data_dir=paths['data_dir'],
+            train_subset_csv=paths['train_subset_csv'],
+            dataset_json_path=paths['dataset_json'],
+            subset_size=args.subset_size
+        )
+        
+        if not success:
+            print("\n❌ Stage 1 failed!")
+            return 1
+        print("\n✅ Stage 1 complete!")
+    
+    # Stage 2: Train Model
+    if 2 in args.stages:
+        print("\n\n" + "#"*60)
+        print("# STAGE 2: TRAIN MODEL")
+        print("#"*60)
+        
+        success = stage_2_train_model(
+            dataset_json_path=paths['dataset_json'],
+            image_dir=paths['images'],
+            checkpoint_dir=paths['checkpoint_dir'],
+            final_adapter_dir=paths['final_adapter_dir'],
+            batch_size=args.batch_size,
+            num_epochs=args.num_epochs
+        )
+        
+        if not success:
+            print("\n❌ Stage 2 failed!")
+            return 1
+        print("\n✅ Stage 2 complete!")
+    
+    # Stage 3: Verify & Test
+    if 3 in args.stages:
+        print("\n\n" + "#"*60)
+        print("# STAGE 3: VERIFY & TEST")
+        print("#"*60)
+        
+        success = stage_3_verify_test(
+            train_subset_csv=paths['train_subset_csv'],
+            image_dir=paths['images'],
+            tf_script_path=paths['tf_script'],
+            tf_model_file=paths['tf_model_file'],
+            final_adapter_dir=paths['final_adapter_dir'],
+            num_tests=args.num_tests
+        )
+        
+        if not success:
+            print("\n❌ Stage 3 failed!")
+            return 1
+        print("\n✅ Stage 3 complete!")
+    
+    # Final summary
+    print("\n\n" + "#"*60)
+    print("# ALL STAGES COMPLETED SUCCESSFULLY!")
+    print("#"*60)
+    print(f"\n📊 Output locations:")
+    print(f"   Adapter: {paths['final_adapter_dir']}")
+    print(f"   Checkpoints: {paths['checkpoint_dir']}")
+    print(f"   Data: {paths['dataset_json']}")
+    print("\n✅ Ready for inference!")
+    
+    return 0
 
-    os.makedirs("outputs", exist_ok=True)
-    outfile="outputs/predictions.csv"
-    f=open(outfile,"w", newline="")
-    writer=csv.writer(f)
-    writer.writerow(["image_id","instance_idx","pred_weight","class_pred","physics_weight"])
-    imgs=glob.glob(os.path.join(args.images,"*.jpg"))+glob.glob(os.path.join(args.images,"*.png"))
-    for img_path in tqdm(imgs):
-        image_bgr=cv2.imread(img_path)
-        results=seg.predict(image_bgr)
-        if not results: continue
-        img_rgb=cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        plate_diam_cm=25; plate_area_cm2=3.1416*(plate_diam_cm/2)**2
-        h,w=img_rgb.shape[:2]; px_per_cm=max(h,w)/plate_diam_cm
-        pil_img=Image.open(img_path).convert("RGB")
-        for i,res in enumerate(results):
-            feats=compute_all_features(img_rgb, res["mask"], px_per_cm, plate_area_cm2)
-            feats_vec=tokenizer.dict_to_tensor(feats, device=device).unsqueeze(0)
-            # classification on full image (simplified, ideally crop)
-            with torch.no_grad():
-                logits=classifier(torch.nn.functional.interpolate(
-                    torch.tensor(img_rgb).permute(2,0,1).unsqueeze(0).float()/255.,
-                    size=(cfg["data"]["img_size"], cfg["data"]["img_size"])
-                ).to(device))
-                probs=torch.softmax(logits,1)
-                class_pred=probs.argmax(1).item()
-            physics_w,_=physics_weight(feats["area_cm2"], list(load_json(os.path.join(cfg["data"]["root"],"class_mapping.json")).keys())[class_pred])
-            phx_vec=torch.tensor([[physics_w,1.0,1.0]], device=device)
-            full_features=torch.cat([feats_vec, probs, phx_vec],1)
-            if adapter:
-                full_features=adapter(full_features)
-            vision_embed=mllm.image_embedding(pil_img)
-            with torch.no_grad():
-                pred_w=pred_model(full_features, vision_embed).item()
-            writer.writerow([os.path.basename(img_path), i, pred_w, class_pred, physics_w])
-    f.close()
-    console.log(f"Saved predictions to {outfile}")
-
-def load_json(p): 
-    with open(p,'r') as f: return json.load(f)
-
-if __name__=="__main__":
-    main()
+if __name__ == "__main__":
+    sys.exit(main())
