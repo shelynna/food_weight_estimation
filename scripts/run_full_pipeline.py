@@ -30,7 +30,7 @@ def setup_environment(root_dir):
     }
     
     # Verify required input paths
-    print("\n📍 Checking input paths...")
+    print("\nChecking input paths...")
     required_inputs = [
         paths['images'],
         paths['master_csv'],
@@ -39,17 +39,17 @@ def setup_environment(root_dir):
     
     for path in required_inputs:
         if os.path.exists(path):
-            print(f"   ✓ {os.path.basename(path)}")
+            print(f"   OK {os.path.basename(path)}")
         else:
-            print(f"   ✗ MISSING: {path}")
+            print(f"   MISSING: {path}")
             return None
     
     # Create output directories
-    print("\n📁 Creating output directories...")
+    print("\nCreating output directories...")
     os.makedirs(paths['data_dir'], exist_ok=True)
     os.makedirs(paths['checkpoint_dir'], exist_ok=True)
     os.makedirs(paths['final_adapter_dir'], exist_ok=True)
-    print("   ✓ Output directories ready")
+    print("   Output directories ready")
     
     return paths
 
@@ -128,7 +128,7 @@ def main():
         if not success:
             print("\n❌ Stage 1 failed!")
             return 1
-        print("\n✅ Stage 1 complete!")
+        print("\nStage 1 complete.")
     
     # Stage 2: Train Model
     if 2 in args.stages:
@@ -148,7 +148,7 @@ def main():
         if not success:
             print("\n❌ Stage 2 failed!")
             return 1
-        print("\n✅ Stage 2 complete!")
+        print("\nStage 2 complete.")
     
     # Stage 3: Verify & Test
     if 3 in args.stages:
@@ -168,17 +168,17 @@ def main():
         if not success:
             print("\n❌ Stage 3 failed!")
             return 1
-        print("\n✅ Stage 3 complete!")
+        print("\nStage 3 complete.")
     
     # Final summary
     print("\n\n" + "#"*60)
     print("# ALL STAGES COMPLETED SUCCESSFULLY!")
     print("#"*60)
-    print(f"\n📊 Output locations:")
+    print(f"\nOutput locations:")
     print(f"   Adapter: {paths['final_adapter_dir']}")
     print(f"   Checkpoints: {paths['checkpoint_dir']}")
     print(f"   Data: {paths['dataset_json']}")
-    print("\n✅ Ready for inference!")
+    print("\nReady for inference.")
     
     return 0
 

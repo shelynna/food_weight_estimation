@@ -33,23 +33,23 @@ def stage_1_generate_data(
     print("="*60)
     
     # 1. Load Master CSV
-    print(f"\n📄 Loading Master CSV: {master_csv_path}")
+    print(f"\nLoading Master CSV: {master_csv_path}")
     try:
         df_master = pd.read_csv(master_csv_path)
-        print(f"   ✓ Found {len(df_master)} total images")
+        print(f"   Found {len(df_master)} total images")
     except Exception as e:
         print(f"   ✗ Error loading CSV: {e}")
         return False
 
     # 2. Create subset
-    print(f"\n📊 Creating training subset (n={subset_size})...")
+    print(f"\nCreating training subset (n={subset_size})...")
     df_subset = df_master.sample(n=min(subset_size, len(df_master)), random_state=42)
     df_subset.to_csv(train_subset_csv, index=False)
-    print(f"   ✓ Saved subset to {train_subset_csv}")
+    print(f"   Saved subset to {train_subset_csv}")
 
     # 3. Run CV Model in Batch (Subprocess)
-    print("\n🚀 Running CV Model (TensorFlow 1)...")
-    print("   ⏳ This takes ~1 minute...")
+    print("\nRunning CV Model (TensorFlow 1)...")
+    print("   This takes about 1 minute...")
     
     command = [
         "python", tf_script_path,
@@ -63,17 +63,17 @@ def stage_1_generate_data(
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=True)
         cv_results = json.loads(result.stdout)
-        print(f"   ✓ CV Model finished. Processed {len(cv_results)} images.")
+        print(f"   CV Model finished. Processed {len(cv_results)} images.")
     except subprocess.CalledProcessError as e:
-        print("   ✗ CV Script Failed!")
+        print("   CV Script Failed")
         print(f"   STDERR: {e.stderr}")
         return False
     except json.JSONDecodeError:
-        print("   ✗ CV output could not be parsed as JSON")
+        print("   CV output could not be parsed as JSON")
         return False
 
     # 4. Format for LLaVA
-    print("\n📋 Formatting data for LLaVA...")
+    print("\nFormatting data for LLaVA...")
     dataset_data = []
     df_train = pd.read_csv(train_subset_csv)
 
@@ -115,8 +115,8 @@ def stage_1_generate_data(
     with open(dataset_json_path, 'w') as f:
         json.dump(dataset_data, f, indent=2)
 
-    print(f"   ✓ Created {len(dataset_data)} training samples")
-    print(f"   ✓ Saved to {dataset_json_path}")
+    print(f"   Created {len(dataset_data)} training samples")
+    print(f"   Saved to {dataset_json_path}")
     
     return True
 

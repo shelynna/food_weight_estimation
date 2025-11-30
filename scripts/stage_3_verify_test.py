@@ -64,7 +64,7 @@ def stage_3_verify_test(
     print("="*60)
     
     # 1. Load Trained Model
-    print(f"\n Loading Fine-Tuned Model...")
+    print(f"\nLoading Fine-Tuned Model...")
     try:
         torch.cuda.empty_cache()
         
@@ -80,22 +80,22 @@ def stage_3_verify_test(
         model = PeftModel.from_pretrained(model_base, final_adapter_dir)
         processor = AutoProcessor.from_pretrained(final_adapter_dir)
         model.eval()
-        print("   ✓ Model loaded successfully")
+        print("   Model loaded successfully")
     except Exception as e:
-        print(f"   ✗ Error loading model: {e}")
+        print(f"   Error loading model: {e}")
         return False
 
     # 2. Load test data
-    print(f"\n Loading test data...")
+    print(f"\nLoading test data...")
     try:
         df_test = pd.read_csv(train_subset_csv)
-        print(f"   ✓ Loaded {len(df_test)} test samples")
+        print(f"   Loaded {len(df_test)} test samples")
     except Exception as e:
-        print(f"   ✗ Error loading test data: {e}")
+        print(f"   Error loading test data: {e}")
         return False
 
     # 3. Run tests
-    print(f"\n Running {num_tests} test(s)...")
+    print(f"\nRunning {num_tests} test(s)...")
     results = []
     
     test_samples = df_test.sample(n=min(num_tests, len(df_test)))
@@ -108,17 +108,17 @@ def stage_3_verify_test(
         img_path = os.path.join(image_dir, fname)
         
         if not os.path.exists(img_path):
-            print(f"   ✗ Image not found: {img_path}")
+            print(f"   Image not found: {img_path}")
             continue
         
         # Get CV hint
         print(f" Getting CV hint...")
         cv_weight = get_cv_hint(img_path, tf_script_path, tf_model_file)
         if cv_weight is None:
-            print(f"   ⚠ CV hint unavailable")
+            print(f"   CV hint unavailable")
             cv_weight = 0
         else:
-            print(f"   ✓ CV Weight: {cv_weight:.1f}g")
+            print(f"   CV Weight: {cv_weight:.1f}g")
         
         # Generate LLaVA Output
         print(f" Generating model output...")
@@ -143,9 +143,9 @@ def stage_3_verify_test(
             decoded = processor.decode(out[0], skip_special_tokens=True)
             response = decoded.split("ASSISTANT:")[-1].strip()
             
-            print(f"   ✓ Model Output: {response[:100]}...")
+            print(f"   Model Output: {response[:100]}...")
         except Exception as e:
-            print(f"   ✗ Model generation failed: {e}")
+            print(f"   Model generation failed: {e}")
             response = "Error"
         
         # Ground truth
@@ -156,7 +156,7 @@ def stage_3_verify_test(
             print(f" Ground Truth: {gt_text}")
         except:
             gt_text = "Unknown"
-            print(f"   ⚠ Ground truth unavailable")
+            print(f"   Ground truth unavailable")
         
         # Store result
         results.append({

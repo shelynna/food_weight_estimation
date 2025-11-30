@@ -37,7 +37,7 @@ def stage_2_train_model(
     print("="*60)
     
     # 1. Config
-    print(f"\n🔧 Configuration:")
+    print(f"\nConfiguration:")
     print(f"   Model: {model_id}")
     print(f"   Batch Size: {batch_size}")
     print(f"   Gradient Accumulation: {grad_accum_steps}")
@@ -47,7 +47,7 @@ def stage_2_train_model(
     torch.cuda.empty_cache()
 
     # 2. Load Model (4-bit)
-    print("\n⏳ Loading LLaVA (4-bit quantization)...")
+    print("\nLoading LLaVA (4-bit quantization)...")
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.float16
@@ -61,13 +61,13 @@ def stage_2_train_model(
             torch_dtype=torch.float16
         )
         processor = AutoProcessor.from_pretrained(model_id)
-        print("   ✓ Model loaded successfully")
+        print("   Model loaded successfully")
     except Exception as e:
-        print(f"   ✗ Error loading model: {e}")
+        print(f"   Error loading model: {e}")
         return False
 
     # 3. Add LoRA
-    print("\n⚡ Adding LoRA adapters...")
+    print("\nAdding LoRA adapters...")
     lora_config = LoraConfig(
         r=16, 
         lora_alpha=32, 
@@ -120,20 +120,20 @@ def stage_2_train_model(
             return batch_out
 
     # 5. Load Dataset
-    print("\n📊 Loading dataset...")
+    print("\nLoading dataset...")
     try:
         dataset = load_dataset(
             "json", 
             data_files=dataset_json_path, 
             split="train"
         )
-        print(f"   ✓ Loaded {len(dataset)} samples")
+        print(f"   Loaded {len(dataset)} samples")
     except Exception as e:
-        print(f"   ✗ Error loading dataset: {e}")
+        print(f"   Error loading dataset: {e}")
         return False
 
     # 6. Trainer
-    print("\n🎯 Setting up trainer...")
+    print("\nSetting up trainer...")
     os.makedirs(checkpoint_dir, exist_ok=True)
     
     args = TrainingArguments(
@@ -156,23 +156,23 @@ def stage_2_train_model(
         data_collator=LlavaCollator(processor, image_dir)
     )
 
-    print("\n🚀 Starting Training...")
+    print("\nStarting Training...")
     try:
         trainer.train()
-        print("   ✓ Training completed successfully")
+        print("   Training completed successfully")
     except Exception as e:
-        print(f"   ✗ Training failed: {e}")
+        print(f"   Training failed: {e}")
         return False
 
     # 7. Save Adapter
-    print(f"\n💾 Saving adapter to {final_adapter_dir}...")
+    print(f"\nSaving adapter to {final_adapter_dir}...")
     os.makedirs(final_adapter_dir, exist_ok=True)
     try:
         model.save_pretrained(final_adapter_dir)
         processor.save_pretrained(final_adapter_dir)
-        print("   ✓ Adapter saved successfully")
+        print("   Adapter saved successfully")
     except Exception as e:
-        print(f"   ✗ Error saving adapter: {e}")
+        print(f"   Error saving adapter: {e}")
         return False
     
     return True
